@@ -1,0 +1,306 @@
+{
+  "name": "Export Comments (No Analysis)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "comment-export",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b92136bc-ce32-4a29-a35e-4616be2ddb21",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 0],
+      "webhookId": "comment-export-webhook"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\": true, \"job_id\": \"{{ $json.body.job_id }}\"}",
+        "options": {}
+      },
+      "id": "ac51a338-376c-4a67-af88-7c64b3e1a645",
+      "name": "Respond Immediately",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [624, -96]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v22.0/me/accounts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "32cc3b6c-e014-4495-aac8-5adc29ad0698",
+      "name": "Get Page Tokens",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [624, 80],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "JHC7dBCtkd3bICFX",
+          "name": "BmtlsUser Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Store all pages with tokens for later matching\nconst pages = $input.item.json.data || [];\nconst adIds = $('Webhook').item.json.body.ad_ids || [];\n\n// Create lookup map: page_id -> access_token\nconst pageTokens = {};\nfor (const page of pages) {\n  pageTokens[page.id] = page.access_token;\n}\n\n// Store for later use\nreturn [{\n  json: {\n    ad_ids: adIds,\n    page_tokens: pageTokens\n  }\n}];"
+      },
+      "id": "bf6a2d38-1070-4fb7-bec9-260f5d49de2a",
+      "name": "Prepare Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [848, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const adIds = $input.item.json.ad_ids;\nreturn adIds.map(id => ({json: {ad_id: id}}));"
+      },
+      "id": "fd47eb29-3619-460e-af5d-897ca0485316",
+      "name": "Split Ad IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1072, 0]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "870b9199-e279-4527-85dc-4c1f96174773",
+      "name": "Loop Through Ads",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1280, 0]
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.ad_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "creative{effective_object_story_id}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2305c0fa-124c-4b71-94d9-32ee4c429594",
+      "name": "Get Ad Creative",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1504, 112],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "JHC7dBCtkd3bICFX",
+          "name": "BmtlsUser Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract page ID from effective_object_story_id\nconst storyId = $input.item.json.creative?.effective_object_story_id;\nif (!storyId) {\n  return [];\n}\n\nconst pageId = storyId.split('_')[0];\nconst pageTokens = $('Prepare Data').item.json.page_tokens;\nconst pageToken = pageTokens[pageId];\n\nif (!pageToken) {\n  return [];\n}\n\nreturn [{\n  json: {\n    ad_id: $('Loop Through Ads').item.json.ad_id,\n    post_id: storyId,\n    page_id: pageId,\n    page_token: pageToken\n  }\n}];"
+      },
+      "id": "34f0cefd-4c59-45f8-913f-90649737755a",
+      "name": "Match Page Token",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1728, 112]
+    },
+    {
+      "parameters": {
+        "url": "=https://graph.facebook.com/v19.0/{{ $json.post_id }}/comments",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "fields",
+              "value": "id,message,created_time,from"
+            },
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "specifyHeaders": "json",
+        "jsonHeaders": "={\"Authorization\": \"Bearer {{ $json.page_token }}\"}",
+        "options": {}
+      },
+      "id": "79046536-ffbe-4551-91a4-d6bac3ee0105",
+      "name": "Get Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1952, 112]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.data?.length || 0 }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ee3e9f7d-fb60-44ca-9f9a-594574a676f5",
+      "name": "Has Comments?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2160, 112]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "5f38d97f-a368-45c9-ba09-fd1987927f15",
+      "name": "Split Comments",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [2384, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b7bb6624-c74a-4937-a87d-9d679f9968bb",
+      "name": "Filter Empty",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [2608, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "return {\n  comment_id: $input.item.json.id,\n  message: $input.item.json.message,\n  created_time: $input.item.json.created_time,\n  ad_id: $('Match Page Token').item.json.ad_id\n};"
+      },
+      "id": "prepare-comment-data",
+      "name": "Prepare Comment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2832, 0]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "1fcd6a93-fa2a-460d-b7db-4b2dce896ca6",
+      "name": "Aggregate Comments",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1504, -96]
+    },
+    {
+      "parameters": {
+        "jsCode": "const comments = $input.all();\nconst csvRows = ['Comment ID,Message,Created Time,Ad ID'];\n\nfor (const item of comments) {\n  const row = [\n    item.json.comment_id,\n    `\"${(item.json.message || '').replace(/\"/g, '\"\"')}\"`,\n    item.json.created_time,\n    item.json.ad_id\n  ].join(',');\n  csvRows.push(row);\n}\n\nreturn {\n  csv: csvRows.join('\\n'),\n  filename: `comments_${$('Webhook').item.json.body.job_id}.csv`,\n  total_comments: comments.length\n};"
+      },
+      "id": "51a90abb-2342-4534-b245-3b97697cc7a8",
+      "name": "Generate CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1728, -96]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=UPDATE export_jobs SET status = 'complete', total_comments = {{ $json.total_comments }}, completed_at = NOW() WHERE id = '{{ $('Webhook').item.json.body.job_id }}'",
+        "options": {}
+      },
+      "id": "dee4aa84-525c-4d01-b3b5-d9e8edfd3b77",
+      "name": "Update Job Complete",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1952, -96],
+      "credentials": {
+        "postgres": {
+          "id": "uDaI4cpRDpgAs2Eg",
+          "name": "NEW POSTGREE"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Respond Immediately",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Page Tokens",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Page Tokens": {
+      "main": [[{"node": "Prepare Data", "type": "main", "index": 0}]]
+    },
+    "Prepare Data": {
+      "main": [[{"node": "Split Ad IDs", "type": "main", "index": 0}]]
+    },
+    "Split Ad IDs": {
+      "main": [[{"node": "Loop Through Ads", "type": "main", "index": 0}]]
+    },
+    "Loop Through Ads": {
+      "main": [
+        [{"node": "Aggregate Comments", "type": "main", "index": 0}],
+        [{"node": "Get Ad Creative", "type": "main", "index": 0}]
+      ]
+    },
+    "Get Ad Creative": {
+      "main": [[{"node": "Match Page Token", "type": "main", "index": 0}]]
+    },
+    "Match Page Token": {
+      "main": [[{"node": "Get Comments", "type": "main", "index": 0}]]
+    },
+    "Get Comments": {
+      "main": [[{"node": "Has Comments?", "type": "main", "index": 0}]]
+    },
+    "Has Comments?": {
+      "main": [
+        [{"node": "Split Comments", "type": "main", "index": 0}],
+        [{"node": "Loop Through Ads", "type": "main", "index": 0}]
+      ]
+    },
+    "Split Comments": {
+      "main": [[{"node": "Filter Empty", "type": "main", "index": 0}]]
+    },
+    "Filter Empty": {
+      "main": [[{"node": "Prepare Comment Data", "type": "main", "index": 0}]]
+    },
+    "Prepare Comment Data": {
+      "main": [[{"node": "Loop Through Ads", "type": "main", "index": 0}]]
+    },
+    "Aggregate Comments": {
+      "main": [[{"node": "Generate CSV", "type": "main", "index": 0}]]
+    },
+    "Generate CSV": {
+      "main": [[{"node": "Update Job Complete", "type": "main", "index": 0}]]
+    }
+  },
+  "pinData": {}
+}

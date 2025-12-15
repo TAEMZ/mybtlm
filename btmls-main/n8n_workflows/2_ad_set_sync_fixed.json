@@ -1,0 +1,252 @@
+{
+    "name": "2. Ad Set Sync (Fixed)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "ad-set-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-2",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                0,
+                0
+            ],
+            "webhookId": "ad-set-sync-webhook"
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.body.campaign_id }}/adsets",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,created_time,daily_budget"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "get-adsets-2",
+            "name": "Get Ad Sets",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                220,
+                0
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "string": [
+                        {
+                            "value1": "={{ $json.data.length }}",
+                            "operation": "isNotEmpty"
+                        }
+                    ]
+                }
+            },
+            "id": "check-has-data",
+            "name": "Has Ad Sets?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                440,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "data",
+                "options": {}
+            },
+            "id": "split-adsets-2",
+            "name": "Split Ad Sets",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                660,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "loop-adsets-2",
+            "name": "Loop Ad Sets",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                880,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO facebook_ad_sets (id, campaign_id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Webhook').item.json.body.campaign_id }}',\n  '{{ $('Webhook').item.json.body.brand_id }}',\n  '{{ $json.name.replace(/'/g, \"''\") }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO NOTHING",
+                "options": {}
+            },
+            "id": "save-adset-2",
+            "name": "Save Ad Set",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                1100,
+                -200
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "url": "=https://n8n.btmls.com/webhook/ads-sync",
+                "method": "POST",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"ad_set_id\": \"{{ $json.id }}\",\n  \"campaign_id\": \"{{ $('Webhook').item.json.body.campaign_id }}\",\n  \"brand_id\": \"{{ $('Webhook').item.json.body.brand_id }}\"\n}",
+                "options": {}
+            },
+            "id": "trigger-ads-sync-2",
+            "name": "Trigger Ads Sync",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1320,
+                -200
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"campaign_id\": \"{{ $('Webhook').item.json.body.campaign_id }}\",\n  \"ad_sets_synced\": {{ $('Save Ad Set').all().length || 0 }}\n}",
+                "options": {}
+            },
+            "id": "respond-2",
+            "name": "Respond",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1100,
+                100
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Get Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Has Ad Sets?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Has Ad Sets?": {
+            "main": [
+                [
+                    {
+                        "node": "Split Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Save Ad Set",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Ad Set": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Ads Sync",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Trigger Ads Sync": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {}
+}

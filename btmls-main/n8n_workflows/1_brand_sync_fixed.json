@@ -1,0 +1,291 @@
+{
+    "name": "1. Brand Sync (Fixed)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "brand-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "acc8828c-e1a5-49f6-b748-884f3573787d",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                -1760,
+                60
+            ],
+            "webhookId": "brand-sync-webhook"
+        },
+        {
+            "parameters": {
+                "url": "https://graph.facebook.com/v19.0/me/adaccounts",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,account_id"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "b696e7a0-0416-432d-9bbe-7641b78a684e",
+            "name": "Get Brands from Facebook",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -1540,
+                60
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "548e39d2-6d42-401c-88a4-81e97b264832",
+            "name": "Loop Through Brands",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                -660,
+                60
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO brands (id, brand_name, created_at)\nVALUES ('{{ $json.account_id }}', '{{ $json.name }}', NOW())\nON CONFLICT (id) DO NOTHING\nRETURNING id",
+                "options": {}
+            },
+            "id": "912b4953-a186-447c-8098-b7faa9a45c97",
+            "name": "Save Brand to Database",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                -200,
+                -60
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"brands_synced\": {{ $('Loop Through Brands').all().length }}\n}",
+                "options": {}
+            },
+            "id": "f67b4ab1-eec6-4480-8549-d1e0f35bd2f0",
+            "name": "Respond to Webhook",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1100,
+                60
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract the data array from Facebook response\nreturn $input.item.json.data.map(brand => ({ json: brand }));"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -1320,
+                60
+            ],
+            "id": "43d80db6-1204-4bf8-b944-8e9522aede37",
+            "name": "Extract Brands"
+        },
+        {
+            "parameters": {
+                "amount": 2
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                20,
+                -60
+            ],
+            "id": "59688f1a-f891-4f05-a686-3efbccb8ed09",
+            "name": "Wait Between Brands",
+            "webhookId": "4423b472-8742-478d-a982-1c425b369478"
+        },
+        {
+            "parameters": {
+                "workflowId": {
+                    "__rl": true,
+                    "value": "VpQUgWwxhHwwtgV6",
+                    "mode": "list",
+                    "cachedResultName": "campain_sync"
+                },
+                "workflowInputs": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "brand_id": "={{ $json.brand_id }}"
+                    },
+                    "matchingColumns": [],
+                    "schema": [
+                        {
+                            "id": "brand_id",
+                            "displayName": "brand_id",
+                            "required": false,
+                            "defaultMatch": false,
+                            "canBeUsedToMatch": true,
+                            "display": true,
+                            "type": "string",
+                            "removed": false
+                        }
+                    ],
+                    "attemptToConvertTypes": false,
+                    "convertFieldsToString": true
+                },
+                "options": {
+                    "waitForSubWorkflow": false
+                }
+            },
+            "type": "n8n-nodes-base.executeWorkflow",
+            "typeVersion": 1.2,
+            "position": [
+                460,
+                -60
+            ],
+            "id": "41e2ef05-e571-4291-8330-811ca4d72b7c",
+            "name": "Trigger Campaign Sync",
+            "notes": "Fire & forget - runs in background"
+        },
+        {
+            "parameters": {
+                "jsCode": "// Pass the brand_id (account_id) to Execute Workflow\nreturn [{\n  json: {\n    brand_id: $('Loop Through Brands').item.json.account_id\n  }\n}];"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                240,
+                -60
+            ],
+            "id": "prepare-brand-id",
+            "name": "Prepare Brand ID"
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Get Brands from Facebook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Brands from Facebook": {
+            "main": [
+                [
+                    {
+                        "node": "Extract Brands",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Through Brands": {
+            "main": [
+                [
+                    {
+                        "node": "Respond to Webhook",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Save Brand to Database",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Brand to Database": {
+            "main": [
+                [
+                    {
+                        "node": "Wait Between Brands",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Extract Brands": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Through Brands",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait Between Brands": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Brand ID",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Trigger Campaign Sync": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Through Brands",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Brand ID": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Campaign Sync",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "meta": {
+        "templateCredsSetupCompleted": true,
+        "instanceId": "558d88703fb65b2d0e44613bc35916258b0f0bf983c5d4730c00c424b77ca36a"
+    }
+}

@@ -1,0 +1,465 @@
+{
+    "name": "4. Comment Export (Matched Tokens)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "comment-export",
+                "responseMode": "responseNode"
+            },
+            "id": "webhook-1",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                0,
+                0
+            ],
+            "webhookId": "comment-export-webhook"
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\"success\": true, \"job_id\": \"{{ $json.body.job_id }}\"}"
+            },
+            "id": "respond-immediate",
+            "name": "Respond Immediately",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                220,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "url": "https://graph.facebook.com/v22.0/me/accounts",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth"
+            },
+            "id": "get-pages",
+            "name": "Get Page Tokens",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                220,
+                0
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Store all pages with tokens for later matching\nconst pages = $input.item.json.data || [];\nconst adIds = $('Webhook').item.json.body.ad_ids || [];\n\n// Create lookup map: page_id -> access_token\nconst pageTokens = {};\nfor (const page of pages) {\n  pageTokens[page.id] = page.access_token;\n}\n\n// Store for later use\nreturn [{\n  json: {\n    ad_ids: adIds,\n    page_tokens: pageTokens\n  }\n}];"
+            },
+            "id": "prepare-data",
+            "name": "Prepare Data",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                440,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const adIds = $input.item.json.ad_ids;\nreturn adIds.map(id => ({json: {ad_id: id}}));"
+            },
+            "id": "split-ads",
+            "name": "Split Ad IDs",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                660,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "batchSize": 1
+            },
+            "id": "loop-ads",
+            "name": "Loop Through Ads",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                880,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.ad_id }}",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "creative{effective_object_story_id}"
+                        }
+                    ]
+                }
+            },
+            "id": "get-creative",
+            "name": "Get Ad Creative",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1100,
+                100
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Extract page ID from effective_object_story_id\nconst storyId = $input.item.json.creative?.effective_object_story_id;\nif (!storyId) {\n  return [];\n}\n\nconst pageId = storyId.split('_')[0];\nconst pageTokens = $('Prepare Data').item.json.page_tokens;\nconst pageToken = pageTokens[pageId];\n\nif (!pageToken) {\n  return [];\n}\n\nreturn [{\n  json: {\n    ad_id: $('Loop Through Ads').item.json.ad_id,\n    post_id: storyId,\n    page_id: pageId,\n    page_token: pageToken\n  }\n}];"
+            },
+            "id": "match-token",
+            "name": "Match Page Token",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1320,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.post_id }}/comments",
+                "sendHeaders": true,
+                "specifyHeaders": "json",
+                "jsonHeaders": "={\"Authorization\": \"Bearer {{ $json.page_token }}\"}",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,message,created_time,from"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                }
+            },
+            "id": "get-comments",
+            "name": "Get Comments",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1540,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "number": [
+                        {
+                            "value1": "={{ $json.data?.length || 0 }}",
+                            "operation": "larger",
+                            "value2": 0
+                        }
+                    ]
+                }
+            },
+            "id": "has-comments",
+            "name": "Has Comments?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1760,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "data"
+            },
+            "id": "split-comments",
+            "name": "Split Comments",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                1980,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "string": [
+                        {
+                            "value1": "={{ $json.message }}",
+                            "operation": "isNotEmpty"
+                        }
+                    ]
+                }
+            },
+            "id": "filter-empty",
+            "name": "Filter Empty",
+            "type": "n8n-nodes-base.filter",
+            "typeVersion": 2,
+            "position": [
+                2200,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "modelId": {
+                    "__rl": true,
+                    "value": "chatgpt-4o-latest",
+                    "mode": "list"
+                },
+                "messages": {
+                    "values": [
+                        {
+                            "content": "=Analyze this ad comment:\n\"{{ $json.message }}\"\n\nReturn ONLY valid JSON:\n{\n  \"sentiment\": \"Positive|Negative|Neutral\",\n  \"theme\": \"2-3 word topic\"\n}"
+                        }
+                    ]
+                },
+                "options": {
+                    "temperature": 0.3
+                }
+            },
+            "id": "analyze-ai",
+            "name": "Analyze Comment",
+            "type": "@n8n/n8n-nodes-langchain.openAi",
+            "typeVersion": 1.3,
+            "position": [
+                2420,
+                0
+            ],
+            "credentials": {
+                "openAiApi": {
+                    "id": "c6QQphdZShCsKsCP",
+                    "name": "Nico 2nd"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "const analysis = JSON.parse($input.item.json.choices[0].message.content);\nreturn {\n  comment_id: $('Filter Empty').item.json.id,\n  message: $('Filter Empty').item.json.message,\n  sentiment: analysis.sentiment,\n  theme: analysis.theme,\n  created_time: $('Filter Empty').item.json.created_time,\n  ad_id: $('Match Page Token').item.json.ad_id\n};"
+            },
+            "id": "parse-response",
+            "name": "Parse Response",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                2640,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "aggregate": "aggregateAllItemData"
+            },
+            "id": "aggregate",
+            "name": "Aggregate Comments",
+            "type": "n8n-nodes-base.aggregate",
+            "typeVersion": 1,
+            "position": [
+                1100,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const comments = $input.all();\nconst csvRows = ['Comment ID,Message,Sentiment,Theme,Created Time,Ad ID'];\n\nfor (const item of comments) {\n  const row = [\n    item.json.comment_id,\n    `\"${(item.json.message || '').replace(/\"/g, '\"\"')}\"`,\n    item.json.sentiment,\n    item.json.theme,\n    item.json.created_time,\n    item.json.ad_id\n  ].join(',');\n  csvRows.push(row);\n}\n\nreturn {\n  csv: csvRows.join('\\n'),\n  filename: `comments_${$('Webhook').item.json.body.job_id}.csv`,\n  total_comments: comments.length\n};"
+            },
+            "id": "generate-csv",
+            "name": "Generate CSV",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1320,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "=UPDATE export_jobs SET status = 'complete', total_comments = {{ $json.total_comments }}, completed_at = NOW() WHERE id = '{{ $('Webhook').item.json.body.job_id }}'",
+                "options": {}
+            },
+            "id": "update-job",
+            "name": "Update Job Complete",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                1540,
+                -100
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Immediately"
+                    },
+                    {
+                        "node": "Get Page Tokens"
+                    }
+                ]
+            ]
+        },
+        "Get Page Tokens": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Data"
+                    }
+                ]
+            ]
+        },
+        "Prepare Data": {
+            "main": [
+                [
+                    {
+                        "node": "Split Ad IDs"
+                    }
+                ]
+            ]
+        },
+        "Split Ad IDs": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Through Ads"
+                    }
+                ]
+            ]
+        },
+        "Loop Through Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Aggregate Comments"
+                    }
+                ],
+                [
+                    {
+                        "node": "Get Ad Creative"
+                    }
+                ]
+            ]
+        },
+        "Get Ad Creative": {
+            "main": [
+                [
+                    {
+                        "node": "Match Page Token"
+                    }
+                ]
+            ]
+        },
+        "Match Page Token": {
+            "main": [
+                [
+                    {
+                        "node": "Get Comments"
+                    }
+                ]
+            ]
+        },
+        "Get Comments": {
+            "main": [
+                [
+                    {
+                        "node": "Has Comments?"
+                    }
+                ]
+            ]
+        },
+        "Has Comments?": {
+            "main": [
+                [
+                    {
+                        "node": "Split Comments"
+                    }
+                ],
+                [
+                    {
+                        "node": "Loop Through Ads"
+                    }
+                ]
+            ]
+        },
+        "Split Comments": {
+            "main": [
+                [
+                    {
+                        "node": "Filter Empty"
+                    }
+                ]
+            ]
+        },
+        "Filter Empty": {
+            "main": [
+                [
+                    {
+                        "node": "Analyze Comment"
+                    }
+                ]
+            ]
+        },
+        "Analyze Comment": {
+            "main": [
+                [
+                    {
+                        "node": "Parse Response"
+                    }
+                ]
+            ]
+        },
+        "Parse Response": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Through Ads"
+                    }
+                ]
+            ]
+        },
+        "Aggregate Comments": {
+            "main": [
+                [
+                    {
+                        "node": "Generate CSV"
+                    }
+                ]
+            ]
+        },
+        "Generate CSV": {
+            "main": [
+                [
+                    {
+                        "node": "Update Job Complete"
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {}
+}

@@ -1,0 +1,334 @@
+{
+    "name": "4. Ads Sync (Execute Workflow)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "ads-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                -900,
+                100
+            ],
+            "webhookId": "ads-sync-webhook"
+        },
+        {
+            "parameters": {},
+            "id": "execute-trigger",
+            "name": "Execute Workflow Trigger",
+            "type": "n8n-nodes-base.executeWorkflowTrigger",
+            "typeVersion": 1,
+            "position": [
+                -900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Normalize input from both Webhook and Execute Workflow\nconst input = $input.item.json;\nconst ad_set_id = input.ad_set_id || input.body?.ad_set_id;\nconst campaign_id = input.campaign_id || input.body?.campaign_id;\nconst brand_id = input.brand_id || input.body?.brand_id;\n\nif (!ad_set_id || !campaign_id || !brand_id) {\n  throw new Error('ad_set_id, campaign_id, and brand_id are required');\n}\n\nreturn [{\n  json: {\n    ad_set_id: ad_set_id,\n    campaign_id: campaign_id,\n    brand_id: brand_id\n  }\n}];"
+            },
+            "id": "normalize-input",
+            "name": "Normalize Input",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -700,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "amount": 2
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -500,
+                200
+            ],
+            "id": "wait-rate-limit",
+            "name": "Wait",
+            "webhookId": "ads-wait"
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.ad_set_id }}/ads",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,created_time"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "get-ads",
+            "name": "Get Ads",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -300,
+                200
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "number": [
+                        {
+                            "value1": "={{ $json.data.length }}",
+                            "operation": "larger"
+                        }
+                    ]
+                }
+            },
+            "id": "has-ads",
+            "name": "Has Ads?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                -80,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "data",
+                "options": {}
+            },
+            "id": "split-ads",
+            "name": "Split Ads",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                140,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "loop-ads",
+            "name": "Loop Ads",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                360,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO facebook_ads (id, ad_set_id, campaign_id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Normalize Input').item.json.ad_set_id }}',\n  '{{ $('Normalize Input').item.json.campaign_id }}',\n  '{{ $('Normalize Input').item.json.brand_id }}',\n  '{{ $json.name.replace(/'/g, \"''\") }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO UPDATE SET\n  name = EXCLUDED.name,\n  status = EXCLUDED.status,\n  ad_set_id = EXCLUDED.ad_set_id,\n  campaign_id = EXCLUDED.campaign_id,\n  brand_id = EXCLUDED.brand_id;",
+                "options": {}
+            },
+            "id": "save-ad",
+            "name": "Save Ad",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                580,
+                100
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "amount": 2
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                800,
+                100
+            ],
+            "id": "wait-between-ads",
+            "name": "Wait Between Ads",
+            "webhookId": "wait-between-ads"
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"ad_set_id\": \"{{ $('Normalize Input').item.json.ad_set_id }}\",\n  \"ads_synced\": {{ $('Save Ad').all().length }}\n}",
+                "options": {}
+            },
+            "id": "respond-success",
+            "name": "Respond Success",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                580,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"ad_set_id\": \"{{ $('Normalize Input').item.json.ad_set_id }}\",\n  \"ads_synced\": 0\n}",
+                "options": {}
+            },
+            "id": "respond-empty",
+            "name": "Respond Empty",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                140,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Execute Workflow Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Input": {
+            "main": [
+                [
+                    {
+                        "node": "Wait",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait": {
+            "main": [
+                [
+                    {
+                        "node": "Get Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Has Ads?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Has Ads?": {
+            "main": [
+                [
+                    {
+                        "node": "Split Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond Empty",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Success",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Save Ad",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Ad": {
+            "main": [
+                [
+                    {
+                        "node": "Wait Between Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait Between Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {}
+}

@@ -1,0 +1,397 @@
+{
+    "name": "3. AdSet Sync (Execute Workflow)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "ad-set-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-trigger",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                -900,
+                100
+            ],
+            "webhookId": "ad-set-sync-webhook"
+        },
+        {
+            "parameters": {},
+            "id": "execute-trigger",
+            "name": "Execute Workflow Trigger",
+            "type": "n8n-nodes-base.executeWorkflowTrigger",
+            "typeVersion": 1,
+            "position": [
+                -900,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Normalize input from both Webhook and Execute Workflow\nconst input = $input.item.json;\nconst campaign_id = input.campaign_id || input.body?.campaign_id;\nconst brand_id = input.brand_id || input.body?.brand_id;\n\nif (!campaign_id || !brand_id) {\n  throw new Error('campaign_id and brand_id are required');\n}\n\nreturn [{\n  json: {\n    campaign_id: campaign_id,\n    brand_id: brand_id\n  }\n}];"
+            },
+            "id": "normalize-input",
+            "name": "Normalize Input",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                -700,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "amount": 1
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                -500,
+                200
+            ],
+            "id": "wait-rate-limit",
+            "name": "Wait",
+            "webhookId": "adset-wait"
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.campaign_id }}/adsets",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,created_time,daily_budget"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "get-adsets",
+            "name": "Get Ad Sets",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                -300,
+                200
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "number": [
+                        {
+                            "value1": "={{ $json.data.length }}",
+                            "operation": "larger"
+                        }
+                    ]
+                }
+            },
+            "id": "has-adsets",
+            "name": "Has Ad Sets?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                -80,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "data",
+                "options": {}
+            },
+            "id": "split-adsets",
+            "name": "Split Ad Sets",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                140,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "loop-adsets",
+            "name": "Loop Ad Sets",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                360,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO facebook_ad_sets (id, campaign_id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Normalize Input').item.json.campaign_id }}',\n  '{{ $('Normalize Input').item.json.brand_id }}',\n  '{{ $json.name.replace(/'/g, \"''\") }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO UPDATE SET\n  name = EXCLUDED.name,\n  status = EXCLUDED.status,\n  campaign_id = EXCLUDED.campaign_id,\n  brand_id = EXCLUDED.brand_id;",
+                "options": {}
+            },
+            "id": "save-adset",
+            "name": "Save Ad Set",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                580,
+                0
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "jsCode": "// Prepare data for Ads Sync\nreturn [{\n  json: {\n    ad_set_id: $('Loop Ad Sets').item.json.id,\n    campaign_id: $('Normalize Input').item.json.campaign_id,\n    brand_id: $('Normalize Input').item.json.brand_id\n  }\n}];"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                800,
+                0
+            ],
+            "id": "prepare-ads-data",
+            "name": "Prepare Ads Data"
+        },
+        {
+            "parameters": {
+                "amount": 2
+            },
+            "type": "n8n-nodes-base.wait",
+            "typeVersion": 1.1,
+            "position": [
+                1020,
+                0
+            ],
+            "id": "wait-ads",
+            "name": "Wait Before Ads",
+            "webhookId": "wait-ads"
+        },
+        {
+            "parameters": {
+                "workflowId": {
+                    "__rl": true,
+                    "value": "REPLACE_WITH_ADS_WORKFLOW_ID",
+                    "mode": "id"
+                },
+                "workflowInputs": {
+                    "mappingMode": "defineBelow",
+                    "value": {
+                        "ad_set_id": "={{ $json.ad_set_id }}",
+                        "campaign_id": "={{ $json.campaign_id }}",
+                        "brand_id": "={{ $json.brand_id }}"
+                    }
+                },
+                "options": {
+                    "waitForSubWorkflow": false
+                }
+            },
+            "type": "n8n-nodes-base.executeWorkflow",
+            "typeVersion": 1.2,
+            "position": [
+                1240,
+                0
+            ],
+            "id": "trigger-ads-sync",
+            "name": "Trigger Ads Sync"
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"campaign_id\": \"{{ $('Normalize Input').item.json.campaign_id }}\",\n  \"ad_sets_synced\": {{ $('Save Ad Set') ? $('Save Ad Set').all().length : 0 }}\n}",
+                "options": {}
+            },
+            "id": "respond-success",
+            "name": "Respond Success",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                580,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"campaign_id\": \"{{ $('Normalize Input').item.json.campaign_id }}\",\n  \"ad_sets_synced\": 0\n}",
+                "options": {}
+            },
+            "id": "respond-empty",
+            "name": "Respond Empty",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                140,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Execute Workflow Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Input": {
+            "main": [
+                [
+                    {
+                        "node": "Wait",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait": {
+            "main": [
+                [
+                    {
+                        "node": "Get Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Has Ad Sets?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Has Ad Sets?": {
+            "main": [
+                [
+                    {
+                        "node": "Split Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond Empty",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Success",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Save Ad Set",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Ad Set": {
+            "main": [
+                [
+                    {
+                        "node": "Prepare Ads Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Prepare Ads Data": {
+            "main": [
+                [
+                    {
+                        "node": "Wait Before Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Wait Before Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Ads Sync",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Trigger Ads Sync": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {}
+}

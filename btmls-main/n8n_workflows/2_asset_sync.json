@@ -1,0 +1,379 @@
+{
+    "name": "Asset Sync",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "asset-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                240,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/act_{{ $json.body.brand_id }}/campaigns",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "facebookGraphApi",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,objective,created_time"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                }
+            },
+            "id": "get-campaigns",
+            "name": "Get Campaigns",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                460,
+                400
+            ],
+            "credentials": {
+                "facebookGraphApi": {
+                    "id": "YOUR_FACEBOOK_CREDENTIAL_ID",
+                    "name": "Facebook Graph API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "batchSize": 1,
+                "options": {}
+            },
+            "id": "split-campaigns",
+            "name": "Loop Campaigns",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                680,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "=INSERT INTO facebook_campaigns (id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Webhook').item.json.body.brand_id }}',\n  '{{ $json.name }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO NOTHING"
+            },
+            "id": "save-campaign",
+            "name": "Save Campaign",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                900,
+                400
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+                    "name": "Supabase Postgres"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.id }}/adsets",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "facebookGraphApi",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,created_time,daily_budget"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                }
+            },
+            "id": "get-adsets",
+            "name": "Get Ad Sets",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1120,
+                400
+            ],
+            "credentials": {
+                "facebookGraphApi": {
+                    "id": "YOUR_FACEBOOK_CREDENTIAL_ID",
+                    "name": "Facebook Graph API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "batchSize": 1,
+                "options": {}
+            },
+            "id": "split-adsets",
+            "name": "Loop Ad Sets",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                1340,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "=INSERT INTO facebook_ad_sets (id, campaign_id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Loop Campaigns').item.json.id }}',\n  '{{ $('Webhook').item.json.body.brand_id }}',\n  '{{ $json.name }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO NOTHING"
+            },
+            "id": "save-adset",
+            "name": "Save Ad Set",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                1560,
+                400
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+                    "name": "Supabase Postgres"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.id }}/ads",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "facebookGraphApi",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,created_time"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                }
+            },
+            "id": "get-ads",
+            "name": "Get Ads",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                1780,
+                400
+            ],
+            "credentials": {
+                "facebookGraphApi": {
+                    "id": "YOUR_FACEBOOK_CREDENTIAL_ID",
+                    "name": "Facebook Graph API"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "batchSize": 10,
+                "options": {}
+            },
+            "id": "split-ads",
+            "name": "Loop Ads",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                2000,
+                400
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "=INSERT INTO facebook_ads (id, ad_set_id, campaign_id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Loop Ad Sets').item.json.id }}',\n  '{{ $('Loop Campaigns').item.json.id }}',\n  '{{ $('Webhook').item.json.body.brand_id }}',\n  '{{ $json.name }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO NOTHING"
+            },
+            "id": "save-ad",
+            "name": "Save Ad",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                2220,
+                400
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+                    "name": "Supabase Postgres"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"brand_id\": \"{{ $('Webhook').item.json.body.brand_id }}\",\n  \"campaigns\": {{ $('Save Campaign').all().length }},\n  \"ad_sets\": {{ $('Save Ad Set').all().length }},\n  \"ads\": {{ $('Save Ad').all().length }}\n}"
+            },
+            "id": "respond",
+            "name": "Respond",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                2440,
+                400
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Get Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Campaigns": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Campaigns": {
+            "main": [
+                [
+                    {
+                        "node": "Save Campaign",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Campaign": {
+            "main": [
+                [
+                    {
+                        "node": "Get Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Ad Sets": {
+            "main": [
+                [
+                    {
+                        "node": "Save Ad Set",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Loop Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Ad Set": {
+            "main": [
+                [
+                    {
+                        "node": "Get Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Save Ad",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Loop Ad Sets",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Ad": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "staticData": null,
+    "tags": [],
+    "triggerCount": 0
+}

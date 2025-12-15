@@ -1,0 +1,223 @@
+{
+    "name": "3. Ads Sync (Fixed)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "ads-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-3",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                0,
+                0
+            ],
+            "webhookId": "ads-sync-webhook"
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/{{ $json.body.ad_set_id }}/ads",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,created_time"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "get-ads-3",
+            "name": "Get Ads",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                220,
+                0
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "string": [
+                        {
+                            "value1": "={{ $json.data.length }}",
+                            "operation": "isNotEmpty"
+                        }
+                    ]
+                }
+            },
+            "id": "check-has-ads",
+            "name": "Has Ads?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 1,
+            "position": [
+                440,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "data",
+                "options": {}
+            },
+            "id": "split-ads-3",
+            "name": "Split Ads",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                660,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "loop-ads-3",
+            "name": "Loop Ads",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                880,
+                -100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO facebook_ads (id, ad_set_id, campaign_id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Webhook').item.json.body.ad_set_id }}',\n  '{{ $('Webhook').item.json.body.campaign_id }}',\n  '{{ $('Webhook').item.json.body.brand_id }}',\n  '{{ $json.name.replace(/'/g, \"''\") }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO NOTHING",
+                "options": {}
+            },
+            "id": "save-ad-3",
+            "name": "Save Ad",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                1100,
+                -200
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"ad_set_id\": \"{{ $('Webhook').item.json.body.ad_set_id }}\",\n  \"ads_synced\": {{ $('Save Ad').all().length || 0 }}\n}",
+                "options": {}
+            },
+            "id": "respond-3",
+            "name": "Respond",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1100,
+                100
+            ]
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Get Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Has Ads?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Has Ads?": {
+            "main": [
+                [
+                    {
+                        "node": "Split Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Ads": {
+            "main": [
+                [
+                    {
+                        "node": "Save Ad",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Respond",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Ad": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Ads",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {}
+}

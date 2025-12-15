@@ -1,0 +1,294 @@
+{
+    "name": "1. Campaign Sync (Fixed)",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "campaign-sync",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "webhook-1",
+            "name": "Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                0,
+                0
+            ],
+            "webhookId": "campaign-sync-webhook"
+        },
+        {
+            "parameters": {},
+            "id": "execute-workflow-trigger",
+            "name": "Execute Workflow Trigger",
+            "type": "n8n-nodes-base.executeWorkflowTrigger",
+            "typeVersion": 1,
+            "position": [
+                0,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Normalize input - works for both webhook and Execute Workflow\nconst input = $input.item.json;\nconst brand_id = input.brand_id || input.body?.brand_id;\n\nif (!brand_id) {\n  throw new Error('brand_id is required');\n}\n\nreturn [{\n  json: {\n    brand_id: brand_id\n  }\n}];"
+            },
+            "id": "normalize-input",
+            "name": "Normalize Input",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                220,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "url": "=https://graph.facebook.com/v19.0/act_{{ $json.brand_id }}/campaigns",
+                "authentication": "genericCredentialType",
+                "genericAuthType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "value": "id,name,status,objective,created_time"
+                        },
+                        {
+                            "name": "limit",
+                            "value": "100"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "get-campaigns-1",
+            "name": "Get Campaigns",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.2,
+            "position": [
+                440,
+                100
+            ],
+            "credentials": {
+                "httpHeaderAuth": {
+                    "id": "JHC7dBCtkd3bICFX",
+                    "name": "BmtlsUser Token"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "fieldToSplitOut": "data",
+                "options": {}
+            },
+            "id": "split-campaigns-1",
+            "name": "Split Campaigns",
+            "type": "n8n-nodes-base.splitOut",
+            "typeVersion": 1,
+            "position": [
+                660,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "options": {}
+            },
+            "id": "loop-campaigns-1",
+            "name": "Loop Campaigns",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                880,
+                100
+            ]
+        },
+        {
+            "parameters": {
+                "operation": "executeQuery",
+                "query": "INSERT INTO facebook_campaigns (id, brand_id, name, status, date_launched, created_at)\nVALUES (\n  '{{ $json.id }}',\n  '{{ $('Normalize Input').item.json.brand_id }}',\n  '{{ $json.name.replace(/'/g, \"''\") }}',\n  '{{ $json.status }}',\n  '{{ $json.created_time }}',\n  NOW()\n)\nON CONFLICT (id) DO NOTHING",
+                "options": {}
+            },
+            "id": "save-campaign-1",
+            "name": "Save Campaign",
+            "type": "n8n-nodes-base.postgres",
+            "typeVersion": 2.4,
+            "position": [
+                1100,
+                200
+            ],
+            "credentials": {
+                "postgres": {
+                    "id": "uDaI4cpRDpgAs2Eg",
+                    "name": "NEW POSTGREE"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "workflowId": "={{ $('Get AdSet Sync ID').item.json.workflowId }}",
+                "fieldsToSend": {
+                    "fields": [
+                        {
+                            "fieldName": "campaign_id",
+                            "fieldValue": "={{ $json.id }}"
+                        },
+                        {
+                            "fieldName": "brand_id",
+                            "fieldValue": "={{ $('Normalize Input').item.json.brand_id }}"
+                        }
+                    ]
+                },
+                "options": {
+                    "waitForSubWorkflow": false
+                }
+            },
+            "id": "trigger-adset-sync-1",
+            "name": "Trigger Ad Set Sync",
+            "type": "n8n-nodes-base.executeWorkflow",
+            "typeVersion": 1,
+            "position": [
+                1540,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"success\": true,\n  \"brand_id\": \"{{ $('Normalize Input').item.json.brand_id }}\",\n  \"campaigns_synced\": {{ $('Save Campaign').all().length }}\n}",
+                "options": {}
+            },
+            "id": "respond-1",
+            "name": "Respond",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.1,
+            "position": [
+                1100,
+                0
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "// Get the workflow ID for AdSet Sync\nreturn [{\n  json: {\n    workflowId: '2_ad_set_sync', // Update to your actual workflow name/ID\n    ...($input.item.json)\n  }\n}];"
+            },
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1320,
+                200
+            ],
+            "id": "get-adset-sync-id",
+            "name": "Get AdSet Sync ID"
+        }
+    ],
+    "connections": {
+        "Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Execute Workflow Trigger": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Input",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Input": {
+            "main": [
+                [
+                    {
+                        "node": "Get Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Campaigns": {
+            "main": [
+                [
+                    {
+                        "node": "Split Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Split Campaigns": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Loop Campaigns": {
+            "main": [
+                [
+                    {
+                        "node": "Respond",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Save Campaign",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Save Campaign": {
+            "main": [
+                [
+                    {
+                        "node": "Get AdSet Sync ID",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Trigger Ad Set Sync": {
+            "main": [
+                [
+                    {
+                        "node": "Loop Campaigns",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get AdSet Sync ID": {
+            "main": [
+                [
+                    {
+                        "node": "Trigger Ad Set Sync",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {}
+}
