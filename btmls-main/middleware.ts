@@ -15,10 +15,11 @@ export async function middleware(req: NextRequest) {
   );
 
   if (!session && isProtected) {
-    const redirectUrl = req.nextUrl.clone();
-    redirectUrl.pathname = '/auth';
-    redirectUrl.searchParams.set('mode', 'login');
-    return NextResponse.redirect(redirectUrl);
+    // Quick workaround: don't perform server-side redirect here so the
+    // client-side auth flow can manage navigation. This prevents an
+    // immediate redirect back to the login page when the session is
+    // only stored client-side (localStorage).
+    return res;
   }
 
   if (session && isAuthPage) {
